@@ -137,3 +137,23 @@ def update_password(user: user_dependency, db: db_dependency, update_password: U
     user_model.hash_password = bcrypt_context.hash(update_password.new_password)
     db.commit()
     return JSONResponse(content={"message": "Password updated successfully"}, status_code=200)
+
+
+@router.get('/user')
+def get_user_details(user: user_dependency, db: db_dependency):
+    if user is None:
+        raise HTTPException(status_code=401, detail='Failed Authentication')
+    
+    current_user = db.query(Users).filter(Users.id == user.get('id')).first()
+    if current_user is None:
+        raise HTTPException(status_code=404, detail='User not found')
+    
+    return {
+        'id': current_user.id,
+        'email': current_user.email,
+        'username': current_user.username,
+        'firstname': current_user.firstname,
+        'lastname': current_user.lastname,
+        'role': current_user.role,
+        'is_active': current_user.is_active
+    }
