@@ -103,14 +103,51 @@ def cancel_reservation(user: user_dependency, db: db_dependency, reservation_id:
     return JSONResponse(content={"message": "Reservation canceled successfully"}, status_code=200)
 
 
+
 @app.get("/reservations/my")
 def get_my_reservations(user: user_dependency, db: db_dependency):
 
     if user is None:
-        raise HTTPException(status_code=401, detail="Failed to authenticate user")
+        raise HTTPException(
+            status_code=401,
+            detail="Failed to authenticate user"
+        )
 
-    reservations = db.query(Reservations).filter(Reservations.user_id == user.get('id')).all()
-    return reservations
+    reservations = (
+        db.query(Reservations)
+        .filter(Reservations.user_id == user.get("id"))
+        .all()
+    )
+
+    result = []
+
+    for reservation in reservations:
+        book = db.query(Books).filter(
+            Books.id == reservation.book_id
+        ).first()
+
+        result.append({
+            "id": reservation.id,
+            "user_id": reservation.user_id,
+            "book_id": reservation.book_id,
+            "reservation_date": reservation.reservation_date,
+            "status": reservation.status,
+            "book": {
+                "id": book.id,
+                "title": book.title,
+                "author": book.author,
+                "description": book.description,
+                "price": book.price,
+                "total_copies": book.total_copies,
+                "available_copies": book.available_copies,
+                "cover_image": book.cover_image,
+                "genre": book.genre,
+            } if book else None
+        })
+
+    return result
+
+
 
 
 @app.get('/issued_book/my')
