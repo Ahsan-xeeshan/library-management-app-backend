@@ -1,5 +1,6 @@
 from database import Base
 from sqlalchemy import Column, ForeignKey, Integer, String,Boolean,Float, DateTime
+from sqlalchemy.orm import relationship
 from datetime import datetime
 
 
@@ -41,6 +42,7 @@ class Reservations(Base):
     book_id = Column(Integer, ForeignKey("books.id"))
     reservation_date = Column(DateTime, default=datetime.now)
     status = Column(String, default="pending")  # pending, approved, canceled
+    book = relationship("Books")
 
 
 class IssueRecords(Base):
