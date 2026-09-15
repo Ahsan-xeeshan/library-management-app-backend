@@ -127,25 +127,46 @@ def reserve_book(
 
 
 @app.delete("/books/cancel_reservation/{reservation_id}")
-def cancel_reservation(user: user_dependency, db: db_dependency, reservation_id: int):  
-
+def cancel_reservation(
+    user: user_dependency,
+    db: db_dependency,
+    reservation_id: int
+):
     if user is None:
-        raise HTTPException(status_code=401, detail="Failed to authenticate user")
+        raise HTTPException(
+            status_code=401,
+            detail='Failed to authenticate'
+        )
 
-    reservation = db.query(Reservations).filter(Reservations.id == reservation_id, Reservations.user_id == user.get('id')).first()
+    reservation = db.query(Reservations).filter(
+        Reservations.id == reservation_id,
+        Reservations.user_id == user.get('id'),
+        Reservations.status == 'pending'
+    ).first()
 
     if reservation is None:
-        raise HTTPException(status_code=404, detail="Reservation not found")
+        raise HTTPException(
+            status_code=404,
+            detail='Reservation not found'
+        )
 
-    # Increase the available copies of the book
-    book = db.query(Books).filter(Books.id == reservation.book_id).first()
-    if book:
+    book = db.query(Books).filter(
+        Books.id == reservation.book_id
+    ).first()
+
+    if book is not None:
         book.available_copies += 1
 
-    reservation.status = "canceled"
-    db.commit()
-    return JSONResponse(content={"message": "Reservation canceled successfully"}, status_code=200)
+    reservation.status = 'canceled'
 
+    db.commit()
+
+    return JSONResponse(
+        status_code=200,
+        content={
+            'message': 'Reservation canceled successfully'
+        }
+    )
 
 
 @app.get("/reservations/my")
