@@ -59,28 +59,72 @@ def get_specific_book(user: user_dependency, db: db_dependency, book_id: int):
 
 
 @app.post("/books/reserve/{book_id}")
-def reserve_book(user: user_dependency, db: db_dependency, book_id: int):
+def reserve_book(
+    user: user_dependency,
+    db: db_dependency,
+    book_id: int
+):
 
     if user is None:
-        raise HTTPException(status_code=401, detail="Failed to authenticate user")
+        raise HTTPException(
+            status_code=401,
+            detail="Failed to authenticate user"
+        )
 
-    book = db.query(Books).filter(Books.id == book_id).first()
+    # Find book
+    book = db.query(Books).filter(
+        Books.id == book_id
+    ).first()
 
     if book is None:
-        raise HTTPException(status_code=404, detail="Book not found")
+        raise HTTPException(
+            status_code=404,
+            detail="Book not found"
+        )
 
+    # Check available copies
     if book.available_copies <= 0:
-        raise HTTPException(status_code=400, detail="No available copies for reservation")
+        raise HTTPException(
+            status_code=400,
+            detail="No available copies for reservation"
+        )
 
-    # Create a new reservation
-    reservation = Reservations(user_id=user.get('id'), book_id=book_id)
+    # Check existing pending reservation
+    existing_reservation = db.query(Reservations).filter(
+        Reservations.user_id == user.get('id'),
+        Reservations.book_id == book_id,
+        Reservations.status == 'pending'
+    ).first()
+
+    if existing_reservation:
+        raise HTTPException(
+            status_code=400,
+            detail="You already have a pending reservation for this book"
+        )
+
+    # Create reservation
+    reservation = Reservations(
+        user_id=user.get('id'),
+        book_id=book_id,
+        status='pending'
+    )
+
     db.add(reservation)
 
-    # Decrease the available copies of the book
+    # Reserve one available copy
     book.available_copies -= 1
 
     db.commit()
-    return JSONResponse(content={"message": "Book reserved successfully", "reservation_id": reservation.id}, status_code=201)
+
+    return JSONResponse(
+        content={
+            "message": "Book reserved successfully",
+            "reservation_id": reservation.id
+        },
+        status_code=201
+    )
+
+
 
 @app.delete("/books/cancel_reservation/{reservation_id}")
 def cancel_reservation(user: user_dependency, db: db_dependency, reservation_id: int):  

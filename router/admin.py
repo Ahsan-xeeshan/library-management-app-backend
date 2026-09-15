@@ -113,98 +113,260 @@ def delete_book(user:user_dependency, db: db_dependency, book_id: int):
 
      return JSONResponse(status_code=200, content={'message': 'Book deleted successfully'})
 
+@router.get('/admin/reservations')
+def get_reservations(
+    user: user_dependency,
+    db: db_dependency
+):
+    if user is None or user.get('role') != 'librarian':
+        raise HTTPException(
+            status_code=401,
+            detail='Failed Authentication'
+        )
+
+    reservations = db.query(Reservations).order_by(
+        Reservations.id.desc()
+    ).all()
+
+    result = []
+
+    for reservation in reservations:
+
+        book = db.query(Books).filter(
+            Books.id == reservation.book_id
+        ).first()
+
+        member = db.query(Users).filter(
+            Users.id == reservation.user_id
+        ).first()
+
+        result.append({
+            'id': reservation.id,
+
+            'book_id': reservation.book_id,
+            'book_title': book.title if book else 'Unknown Book',
+
+            'user_id': reservation.user_id,
+            'member_name': (
+                f"{member.first_name} {member.last_name}"
+                if member
+                else 'Unknown Member'
+            ),
+            'member_email': (
+                member.email
+                if member
+                else ''
+            ),
+
+            'reservation_date': (
+                reservation.reservation_date.isoformat()
+                if reservation.reservation_date
+                else None
+            ),
+
+            'status': reservation.status
+        })
+
+    return result
 
 
 @router.post('/admin/issue_book')
-def create_issue(user: user_dependency, db: db_dependency, issue_request: IssueBook):
-      if user is None or user.get('role')!= 'librarian': 
-               raise HTTPException(status_code=401, detail='Failed Authentication')
+def create_issue(
+    user: user_dependency,
+    db: db_dependency,
+    issue_request: IssueBook
+):
+    if user is None or user.get('role') != 'librarian':
+        raise HTTPException(
+            status_code=401,
+            detail='Failed Authentication'
+        )
 
+    # -----------------------------
+    # Find book
+    # -----------------------------
 
-      book = db.query(Books).filter(Books.id == issue_request.book_id).first()
-           
-      if book is None: 
-            raise HTTPException(status_code = 404, detail='Book not found')
+    book = db.query(Books).filter(
+        Books.id == issue_request.book_id
+    ).first()
 
-      member = db.query(Users).filter(Users.id == issue_request.user_id).first()
+    if book is None:
+        raise HTTPException(
+            status_code=404,
+            detail='Book not found'
+        )
 
-      if member is None:
-            raise HTTPException(status_code = 404, detail='Member not found')
+    # -----------------------------
+    # Find member
+    # -----------------------------
 
-      if book.available_copies <= 0:
-            raise HTTPException(status_code=400, detail="No copy Available")
+    member = db.query(Users).filter(
+        Users.id == issue_request.user_id
+    ).first()
 
-      loan_days = 14
-      issue_date = datetime.now
+    if member is None:
+        raise HTTPException(
+            status_code=404,
+            detail='Member not found'
+        )
 
-      issue_model = IssueRecords(
-            book_id = issue_request.book_id,
-            user_id = issue_request.user_id,
-            issue_date = issue_date,
-            due_date = issue_date + timedelta(days = loan_days),
-            status = 'issued'
+    # -----------------------------
+    # Check existing reservation
+    # -----------------------------
 
-      )
-      book.available_copies -= 1
-      reservation = db.query(Reservations).filter(
-            Reservations.book_id == issue_request.book_id,
-            Reservations.user_id == issue_request.user_id,
-            Reservations.status == 'pending'
-      )
+    reservation = db.query(Reservations).filter(
+        Reservations.book_id == issue_request.book_id,
+        Reservations.user_id == issue_request.user_id,
+        Reservations.status == 'pending'
+    ).first()
 
-      if reservation is not None: 
-            reservation.status == 'approved'
+    # -----------------------------
+    # Check available copy
+    # -----------------------------
 
-      db.add(issue_model)
-      
-      db.commit()
+    if reservation is None and book.available_copies <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail='No copy available'
+        )
 
-      return JSONResponse(status_code=200, content={'message': 'Book issued successfully'})
+    # -----------------------------
+    # Create issue record
+    # -----------------------------
 
+    issue_date = datetime.now()
+    loan_days = 14
 
-@router.put('/admin/return_book/{issue_id}')
-def return_book(user: user_dependency, db: db_dependency, issue_id: int):
-      if user is None or user.get('role')!= 'librarian': 
-                     raise HTTPException(status_code=401, detail='Failed Authentication')
-      
-      
-      issue = db.query(IssueRecords).filter(IssueRecords.id == issue_id).first()
+    issue_model = IssueRecords(
+        book_id=issue_request.book_id,
+        user_id=issue_request.user_id,
+        issue_date=issue_date,
+        due_date=issue_date + timedelta(days=loan_days),
+        status='issued'
+    )
 
-      if issue is None: 
-            raise HTTPException(status_code=404, detail='No issue found')
+    # -----------------------------
+    # Reservation exists
+    # -----------------------------
 
-      return_date = datetime.now
+    if reservation is not None:
 
-      fine = calculate_fine(issue.due_date, return_date)
+        # The reservation already reduced
+        # available_copies.
+        #
+        # Therefore DON'T reduce it again.
 
-      issue.return_date = return_date
-      issue.status = 'returned'
+        reservation.status = 'approved'
 
-      issue.fine_amount = fine
+    # -----------------------------
+    # No reservation
+    # -----------------------------
 
-      book = db.query(Books).filter(Books.id == issue.book_id).first()
+    else:
 
-      if book is not None:
-            book.available_copies +=1
+        # Oral/direct request.
+        #
+        # This copy wasn't previously reserved,
+        # so reduce available copies now.
 
-      return JSONResponse(status_code=201, content={'message' : 'Book returns successfully', 'fine_amount': fine})
+        book.available_copies -= 1
 
+    db.add(issue_model)
+
+    db.commit()
+
+    return JSONResponse(
+        status_code=200,
+        content={
+            'message': 'Book issued successfully',
+            'issue_id': issue_model.id,
+            'reserved': reservation is not None
+        }
+    )
+
+@router.put('/reservations/cancel/{reservation_id}')
+def cancel_reservation(
+    user: user_dependency,
+    db: db_dependency,
+    reservation_id: int
+):
+    if user is None:
+        raise HTTPException(
+            status_code=401,
+            detail='Failed to authenticate'
+        )
+
+    reservation = db.query(Reservations).filter(
+        Reservations.id == reservation_id,
+        Reservations.user_id == user.get('id'),
+        Reservations.status == 'pending'
+    ).first()
+
+    if reservation is None:
+        raise HTTPException(
+            status_code=404,
+            detail='Reservation not found'
+        )
+
+    book = db.query(Books).filter(
+        Books.id == reservation.book_id
+    ).first()
+
+    if book is not None:
+        book.available_copies += 1
+
+    reservation.status = 'canceled'
+
+    db.commit()
+
+    return JSONResponse(
+        status_code=200,
+        content={
+            'message': 'Reservation canceled successfully'
+        }
+    )
 
 @router.put('/admin/fine/pay/{issue_id}')
-def pay_fine(user: user_dependency, db: db_dependency, issue_id: int):
+def pay_fine(
+    user: user_dependency,
+    db: db_dependency,
+    issue_id: int
+):
+    if user is None or user.get('role') != 'librarian':
+        raise HTTPException(
+            status_code=401,
+            detail='Failed Authentication'
+        )
 
-      if user is None or user.get('role')!= 'librarian': 
-           raise HTTPException(status_code=401, detail='Failed Authentication')
-            
-            
-      issue = db.query(IssueRecords).filter(IssueRecords.id == issue_id).first()
-      
-      if issue is None: 
-           raise HTTPException(status_code=404, detail='No issue found')
+    issue = db.query(IssueRecords).filter(
+        IssueRecords.id == issue_id
+    ).first()
 
-      issue.fine_paid == True
+    if issue is None:
+        raise HTTPException(
+            status_code=404,
+            detail='No issue found'
+        )
 
-      db.commit()
+    if issue.fine_amount <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail='No fine to pay'
+        )
 
-      return JSONResponse(status_code=200, content={'message' : 'Fine paid successfully'})
-      
+    if issue.fine_paid:
+        raise HTTPException(
+            status_code=400,
+            detail='Fine already paid'
+        )
+
+    issue.fine_paid = True
+
+    db.commit()
+
+    return JSONResponse(
+        status_code=200,
+        content={
+            'message': 'Fine paid successfully'
+        }
+    )
