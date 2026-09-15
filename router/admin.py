@@ -18,7 +18,7 @@ class BookCreate(BaseModel):
     title: str
     author: str
     genre: str
-    description: str = Field(default='', max_length=200)
+    description: str = Field(default='', max_length=2000)
     price: float = Field(default=0.0, ge=0)
     total_copies : int = Field(default=1)
 
